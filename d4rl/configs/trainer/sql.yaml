@@ -1,0 +1,26 @@
+# @package _global_
+
+trainer:
+  obs_norm: False
+  reward_norm: True
+  name: 'SQL'
+  qf_kwargs: {hidden_sizes:[256, 256,],}
+  vf_kwargs: {hidden_sizes:[256, 256,], dropout_rate: 0.5} # 'null' if no use of V function
+  policy_type: 'GaussianPolicy'
+  policy_kwargs: {hidden_sizes:[256, 256,], max_log_std: 2, min_log_std: -5, std_architecture: 'values'}
+  expl_kwargs: null
+  trainer_kwargs: {
+    total_training_steps: 1E6, # include the steps of offline & online period, will be verified when init 'rlalg'
+    discount: 0.99,
+    policy_lr: 3E-4,
+    qf_lr: 3E-4,
+    reward_scale: 1.,
+    soft_target_tau: 0.005,
+    alpha: 2.,
+    cosine_lr_decay: True,
+    clip_score: 100.,
+  }
+  exp_prefix: 'r_norm=${trainer.reward_norm}_s_norm=${trainer.obs_norm}_lr=${trainer.trainer_kwargs.qf_lr}_v_dropout=${trainer.vf_kwargs.dropout_rate}_alpha=${trainer.trainer_kwargs.alpha}_cosine=${trainer.trainer_kwargs.cosine_lr_decay}'
+
+
+

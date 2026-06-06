@@ -1,0 +1,9 @@
+# 忽略的数据集和权重
+datasets/
+checkpoints/
+logs/
+
+# 忽略 Python 缓存
+__pycache__/
+*.pyc
+.env

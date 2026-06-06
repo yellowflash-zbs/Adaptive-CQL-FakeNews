@@ -1,0 +1,49 @@
+
+
+device:
+  seed: 0
+  cuda: True
+  gpu_idx: 0
+
+logger:
+  log_dir: '/home/zy/zz/all_logs/offorrl'
+
+env:
+  name: 'hopper-medium-v2'
+  max_episode_steps: -1 # if >0, will set the max episode length, otherwise follow the default
+
+buffer:
+  max_replay_buffer_size: 2000000
+
+rlalg:
+  online_finetune: False
+  start_epoch: -100 # offline epochs
+  num_epochs: 0 # online epochs
+  batch_size: 128
+  num_eval_steps_per_epoch: 10000
+  num_trains_per_train_loop: 10000
+  num_expl_steps_per_train_loop: 1000
+  min_num_steps_before_training: 1000 # used at the beginning of online finetune
+  num_epochs_per_log_interval: 1
+  save_best: False
+
+
+trainer:
+  name: 'CQL'
+
+spec: # specific config for some envs if needed
+  null
+
+hydra:
+  output_subdir: null
+
+defaults:
+  - _self_
+  - trainer: iql
+  - spec: null
+  - override hydra/launcher: joblib
+
+
+
+
+

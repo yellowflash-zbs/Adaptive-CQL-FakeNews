@@ -1,0 +1,12 @@
+# @package _global_
+spec:
+  'hopper-medium-expert-v2'
+
+trainer:
+  obs_norm: True
+  reward_norm: False
+  trainer_kwargs: {
+    beta: 6.0,
+    quantile: 0.5,
+  }
+

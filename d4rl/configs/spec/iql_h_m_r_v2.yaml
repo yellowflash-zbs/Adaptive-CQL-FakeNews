@@ -1,0 +1,10 @@
+# @package _global_
+spec:
+  'hopper-medium-replay-v2'
+
+trainer:
+  obs_norm: True
+  reward_norm: True
+  trainer_kwargs: {
+    soft_target_tau: 0.001
+  }

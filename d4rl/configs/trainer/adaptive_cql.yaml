@@ -1,0 +1,48 @@
+# @package _global_
+
+trainer:
+  obs_norm: False      # 保持与老师的配置一致：不进行观察值归一化
+  reward_norm: False   # 保持与老师的配置一致：不进行奖励值归一化
+  name: 'AdaptiveCQL'  # 关键：这里要对应你代码中定义的类名
+
+  # 网络结构：完全复刻老师的 3 层 256 神经元架构，确保模型容量一致
+  qf_kwargs: {hidden_sizes: [256, 256, 256]}
+  vf_kwargs: null
+  policy_type: 'TanhGaussianPolicy'
+  policy_kwargs: {hidden_sizes: [256, 256, 256]}
+
+  expl_kwargs: null
+
+  trainer_kwargs: {
+    total_training_steps: 1E6,
+    discount: 0.99,
+    policy_lr: 1E-4,    # 学习率对齐老师的 1E-4
+    qf_lr: 3E-4,        # 学习率对齐老师的 3E-4
+    reward_scale: 1.0,
+    soft_target_tau: 0.005,
+    automatic_entropy_tuning: True,
+
+    # PBRS 实验逻辑：
+    # 因为我们已经有了独立的 BC 预训练模型，这里的内部预热通常设为 0
+    bc_warm_start: 0,
+
+    num_qs: 2,
+    temp: 1.0,
+    min_q_version: 3,
+    min_q_weight: 5.0,  # 对齐老师的保守系数
+    with_lagrange: False,
+    lagrange_thresh: -1.0,
+    num_random: 10,
+    max_q_backup: False,
+    deterministic_backup: True,
+
+    # ========================================================
+    # [自适应组专属参数]
+    # ========================================================
+    kl_scale: 0.5,           # 默认 KL 缩放系数
+    bc_model_path: null,      # 默认留空，由启动脚本动态传入具体的种子路径
+    # ========================================================
+  }
+
+  # 修改实验前缀，方便你在 VisKit 或 TensorBoard 里一眼认出这是“自适应组”
+  exp_prefix: 'AdaptiveCQL_kl=${trainer.trainer_kwargs.kl_scale}_mqw=${trainer.trainer_kwargs.min_q_weight}'

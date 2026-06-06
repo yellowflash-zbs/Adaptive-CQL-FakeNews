@@ -1,0 +1,39 @@
+# @package _global_
+
+trainer:
+  obs_norm: False
+  reward_norm: False
+  name: 'S4RL'
+  qf_kwargs: {hidden_sizes:[256, 256,],}
+  vf_kwargs: null # 'null' if no use of V function
+  policy_type: 'TanhGaussianPolicy'
+  policy_kwargs: {hidden_sizes:[256, 256,]}
+  expl_kwargs: null
+  trainer_kwargs: {
+    total_training_steps: 1E6, # include the steps of offline & online period, will be verified when init 'rlalg'
+    discount: 0.99,
+    policy_lr: 1E-4,
+    qf_lr: 3E-4,
+    reward_scale: 1.,
+    soft_target_tau: 0.005,
+    automatic_entropy_tuning: True,
+    bc_warm_start: 40000,
+    num_qs: 2,
+    temp: 1.0,
+    min_q_version: 3,
+    min_q_weight: 5.0,
+    with_lagrange: False,
+    lagrange_thresh: 10.0, # only useful if 'with_lagrange',
+    num_random: 10,
+    max_q_backup: False,
+    deterministic_backup: True,
+    # s4rl
+    s4rl: {type: 'normal', params: 0.003} # 'adv', 0.0001  / 'uniform', 0.0003
+  }
+  exp_prefix: "s4rl=${trainer.trainer_kwargs.s4rl.type},${trainer.trainer_kwargs.s4rl.params}\
+    _mqw=${trainer.trainer_kwargs.min_q_weight}\
+    _lagrange=${trainer.trainer_kwargs.with_lagrange},${trainer.trainer_kwargs.lagrange_thresh}\
+    _auto_tuning=${trainer.trainer_kwargs.automatic_entropy_tuning}\
+    _det_back=${trainer.trainer_kwargs.deterministic_backup}"
+
+

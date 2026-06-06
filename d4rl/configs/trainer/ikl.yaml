@@ -1,0 +1,40 @@
+# @package _global_
+
+trainer:
+  obs_norm: False
+  reward_norm: False
+  name: 'IKL'
+  qf_kwargs: {hidden_sizes:[256, 256, 256,],}
+  vf_kwargs: null
+  policy_type: 'TanhGaussianPolicy'
+  policy_kwargs: {hidden_sizes:[256, 256, 256,],}
+  expl_kwargs: null
+  trainer_kwargs: {
+    total_training_steps: 1E6, # include the steps of offline & online period, will be verified when init 'rlalg'
+    discount: 0.99,
+    policy_lr: 3E-4,
+    qf_lr: 3E-4,
+    reward_scale: 1.,
+    soft_target_tau: 0.005,
+    num_qs: 10,
+    f_reg: 0.1,
+    reward_bonus: 5.0,
+    alpha: 0.03,
+    tau: 0.9,
+    l_clip: -1.0,
+    bc_type: 'TanhGaussianPolicy',
+    bc_norm: '${trainer.obs_norm}',
+    use_best: False,
+    log_dir: '${logger.log_dir}',
+  }
+  exp_prefix: "r_norm=${trainer.reward_norm}_s_norm=${trainer.obs_norm}\
+  _num_qs=${trainer.trainer_kwargs.num_qs}\
+  _f_reg=${trainer.trainer_kwargs.f_reg}\
+  _bonus=${trainer.trainer_kwargs.reward_bonus}\
+  _alpha=${trainer.trainer_kwargs.alpha}\
+  _tau=${trainer.trainer_kwargs.tau}\
+  _l_clip=${trainer.trainer_kwargs.l_clip}\
+  _bc=${trainer.trainer_kwargs.bc_type}"
+
+
+

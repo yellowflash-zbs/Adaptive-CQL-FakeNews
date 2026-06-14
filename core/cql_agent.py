@@ -21,7 +21,7 @@ except ImportError:
     print("⚠️ 警告: 找不到 rlkit 模块，请确保 d4rl/rlkit 库正确配置在项目中。")
 
 
-def load_adaptive_cql_policy(weight_path, obs_dim=46848, action_dim=60, hidden_sizes=[512, 512, 512], use_gpu=True):
+def load_adaptive_cql_policy(weight_path, obs_dim=46848, action_dim=60, hidden_sizes=[256, 256, 256], use_gpu=True):
     """
     加载训练好的自适应 CQL 策略网络 (Actor Network)
     

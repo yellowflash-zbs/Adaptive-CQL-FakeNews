@@ -284,29 +284,24 @@ class AdaptiveCQLTrainer(TorchTrainer):
         # [关键修复 3]：计算自适应的 State-wise 惩罚系数 b_k(s)
         # 完全采用 IKL 中优雅且鲁棒的 log_prob 提取方式
         # =========================================================================
+        # =========================================================================
+        # [全新修复 3]：基于 Q 值不确定性 (Q-Variance) 的真正自适应惩罚
+        # 放弃使用伪造的随机 BC 模型，改用 Q 网络的输出标准差来衡量 OOD 程度
+        # 这是一个在学术界极其站得住脚的无专家自适应方案！
+        # =========================================================================
         with torch.no_grad():
-            obs_temp_pbrs = obs.unsqueeze(1).repeat(1, self.num_random, 1).view(obs.shape[0] * self.num_random,
-                                                                                obs.shape[1])
+            # std_q1 和 std_q2 已经在代码上方算好，代表了 Q 网络对当前环境的“迷茫程度”
+            # 取两者的平均值作为不确定性指标，并增加维度以对齐 (batch_size, 1)
+            q_variance = ((std_q1 + std_q2) / 2.0).unsqueeze(1)
+            
+            # 将不确定性限制在设定范围内，防止初期惩罚爆炸
+            variance_clipped = torch.clamp(q_variance, min=0.0, max=self.pbrs_u)
 
-            # 直接输出分布对象
-            beta_dist = self.behavior_policy(obs_temp_pbrs)
-
-            # 直接调用分布自带的 log_prob 方法
-            # unsqueeze(-1) 保证 shape 为 (bs * num_random, 1)
-            beta_log_pis = beta_dist.log_prob(curr_actions_tensor).unsqueeze(-1)
-
-            # 重新 reshape 以便和 curr_log_pis 形状对齐计算 KL
-            beta_log_pis = beta_log_pis.view(obs.shape[0], self.num_random, 1)
-
-            # 使用 MC 估计当前策略 (pi) 和 行为策略 (pi_beta) 的 KL 散度
-            kl_div = (curr_log_pis - beta_log_pis).mean(dim=1, keepdim=True)  # Shape: (bs, 1)
-            kl_clipped = torch.clamp(kl_div, min=0.0, max=self.pbrs_u)
-
-            # 缩放系数 c (self.pbrs_c) 在这里参与计算！
+            # 结合你设定的 kl_scale (0.9) 动态生成每个状态专属的 b_k
             if self.pbrs_g == 'softplus':
-                b_k = self.pbrs_c * F.softplus(kl_clipped)
+                b_k = self.pbrs_c * F.softplus(variance_clipped)
             else:
-                b_k = self.pbrs_c * kl_clipped
+                b_k = self.pbrs_c * variance_clipped
 
         # =========================================================================
         # [关键修复 4]：将标量的 self.min_q_weight 替换为自适应矩阵 b_k
@@ -314,6 +309,9 @@ class AdaptiveCQLTrainer(TorchTrainer):
         cql_q1_penalty = (torch.logsumexp(cat_q1 / self.temp, dim=1, keepdim=True) * self.temp) - q1_pred
         cql_q2_penalty = (torch.logsumexp(cat_q2 / self.temp, dim=1, keepdim=True) * self.temp) - q2_pred
 
+        # 🌟 【防爆破补丁】防止惩罚变为负数，掐死 Q 值无限放大的死循环！
+        cql_q1_penalty = torch.clamp(cql_q1_penalty, min=0.0)
+        cql_q2_penalty = torch.clamp(cql_q2_penalty, min=0.0)
         # 逐元素相乘，让差距大的 state 受到更重惩罚
         min_qf1_loss = (cql_q1_penalty * b_k).mean()
         min_qf2_loss = (cql_q2_penalty * b_k).mean()
@@ -371,7 +369,8 @@ class AdaptiveCQLTrainer(TorchTrainer):
             # =========================================================================
             self.eval_statistics['PBRS b_k(s) Mean'] = np.mean(ptu.get_numpy(b_k))
             self.eval_statistics['PBRS b_k(s) Max'] = np.max(ptu.get_numpy(b_k))
-            self.eval_statistics['PBRS KL Divergence'] = np.mean(ptu.get_numpy(kl_clipped))
+            # 将原来记录 KL 散度的那行，替换为记录我们新写的 Q-Variance
+            self.eval_statistics['PBRS Q-Variance'] = np.mean(ptu.get_numpy(variance_clipped))
 
             self.eval_statistics['Std QF1 values'] = np.mean(ptu.get_numpy(std_q1))
             self.eval_statistics['Std QF2 values'] = np.mean(ptu.get_numpy(std_q2))

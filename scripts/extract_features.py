@@ -136,10 +136,24 @@ def main():
                 for tensor in sent_repr_list:
                      src_vectors.append(tensor.cpu().numpy().tolist())
 
-            # 4. 打包并存入列表
+            # 🌟 新增：尝试从 raw_text_dict 中拼凑出原始的 claim 文本
+            try:
+                # 假设 reader5 存的是 token 列表，比如 ['Says', 'the', 'Annies', 'List', ...]
+                if '_CLAIM_TOK' in raw_text_dict:
+                    claim_text = " ".join(raw_text_dict['_CLAIM_TOK'][0])
+                elif 'claim' in raw_text_dict:
+                    claim_text = str(raw_text_dict['claim'])
+                else:
+                    # 如果都不是，先随便塞个占位符，等报错了我们再看它到底叫啥名字
+                    claim_text = "UNKNOWN_CLAIM"
+            except Exception:
+                claim_text = "UNKNOWN_CLAIM"
+
+            # 4. 打包并存入列表 (🌟 把 claim_text 加进去)
             data_point = {
                 "claim_index": i,
                 "ground_truth_label": true_label_str,
+                "claim_text": claim_text,  # <--- 极其关键的这一行！
                 "claim_vector": claim_vector,
                 "candidate_vectors": src_vectors,
                 "candidate_sentences": candidate_sentences

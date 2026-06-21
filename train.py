@@ -90,6 +90,9 @@ def main():
     print("⚙️ 初始化 AdaptiveCQLTrainer...")
     dummy_env = DummyEnv(action_dim)
     
+    print("⚙️ 初始化 AdaptiveCQLTrainer...")
+    dummy_env = DummyEnv(action_dim)
+    
     trainer = AdaptiveCQLTrainer(
         env=dummy_env,
         policy=policy,
@@ -98,11 +101,17 @@ def main():
         target_qf1=target_qf1,
         target_qf2=target_qf2,
         bc_model_path=bc_model_path, 
-        kl_scale=0.9,                
+        kl_scale=0.2,            # 🌟 修复 1：降低惩罚系数，防止压垮 Q 值
         policy_lr=1e-4,
         qf_lr=3e-4,
         reward_scale=1.0,
         automatic_entropy_tuning=True,
+        # =========================================================
+        # 🌟 神级修复 2：斩断自举噪声！证据选取是单步决策，绝对不能看 next_obs！
+        discount=0.0,
+        # 🌟 神级修复 3：关闭维度诅咒！防止 60 维动作空间产生的 +41 荒谬常数压垮网络！
+        min_q_version=2,
+        # =========================================================
     )
     for net in trainer.networks:
         net.to(ptu.device)

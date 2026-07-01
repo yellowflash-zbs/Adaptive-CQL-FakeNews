@@ -15,9 +15,11 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 # ================= 配置区 =================
-# 🚨 填上你真实的 API Key！
-DEEPSEEK_API_KEY = "your_api_key_here" 
-client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
+# 从环境变量读取 API Key，避免把密钥提交到 GitHub。
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+if not DEEPSEEK_API_KEY:
+    raise RuntimeError("请先设置环境变量 DEEPSEEK_API_KEY，再运行 generate_rewards_deepseek.py")
+client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"))
 # ==========================================
 
 class DecimalEncoder(json.JSONEncoder):
@@ -26,7 +28,6 @@ class DecimalEncoder(json.JSONEncoder):
             return float(obj)
         return super(DecimalEncoder, self).default(obj)
 
-# 🌟 文本脱水净化器：确保打分导师也能看到干净的文本，不被乱码蒙蔽
 def clean_spaced_text(text):
     text = str(text).strip()
     if "   " in text:
@@ -35,41 +36,62 @@ def clean_spaced_text(text):
         return " ".join(cleaned_words)
     return text
 
-def get_reward_from_llm(claim_idx, claim_text, ground_truth, selected_sentences):
-    # 🌟 在这里进行脱水清洗！
+# 🌟 新增 dataset_name 参数，让大模型教练理解不同数据集的标签体系
+def get_reward_from_llm(claim_idx, claim_text, ground_truth, selected_sentences, dataset_name):
     clean_claim = clean_spaced_text(claim_text)
     clean_sentences = [clean_spaced_text(sent) for sent in selected_sentences]
-    evidence_text = "\n".join([f"{i+1}. {sent}" for i, sent in enumerate(clean_sentences)])
+    evidence_text = "\n".join([f"Sentence {i+1}: {sent}" for i, sent in enumerate(clean_sentences)])
     
-    # 🌟 严苛的导师 Prompt，包含多样性惩罚 (Diversity Penalty)
+    # 根据数据集动态提供真实标签的含义说明
+    if dataset_name == "LIAR-RAW":
+        label_definitions = """
+    [LIAR 数据集真实标签含义参考]
+    - pants-fire: 极其荒谬的谎言
+    - false: 完全错误
+    - barely-true: 勉强真实（只包含一丁点事实，忽略了关键事实）
+    - half-true: 半真半假
+    - mostly-true: 基本真实（大体正确，需细微补充）
+    - true: 完全真实无误
+        """
+    else:
+        label_definitions = """
+    [RAWFC 数据集真实标签含义参考]
+    - false: 声明不准确或虚假。
+    - half: 声明半真半假，或存在夸大、脱离上下文。
+    - true: 声明完全准确。
+        """
+
     prompt = f"""
-    You are an elite, highly skeptical AI trainer evaluating an agent's evidence selection.
-    The agent selected 5 sentences to verify the following news claim.
-    
-    [NEWS CLAIM]: "{clean_claim}"
-    [TRUE LABEL OF CLAIM]: '{ground_truth}'
-    
-    [SELECTED EVIDENCE]:
+    [系统指令]
+    你是一个严苛且绝对理性的假新闻事实核查教练。强化学习智能体挑选了 5 句话作为核查证据。
+    你的任务是跳出“字面相似度”的陷阱，结合真实标签的含义，【逐句判断】这些证据的立场属性，并给出奖励分数。
+
+    [NEWS CLAIM (新闻声明)]: "{clean_claim}"
+    [TRUE LABEL (该声明最终的真实判决)]: "{ground_truth}"
+    {label_definitions}
+
+    [SELECTED EVIDENCE (选中的5句证据)]:
     {evidence_text}
+
+    【打分规则】:
+    1. 逐句分析立场并计分：
+       - 强反驳 (refute)：句子直接提供了能揭穿虚假/片面部分的铁证 (+10分)
+       - 强支持 (support)：句子直接提供了证实真实部分的铁证 (+10分)
+       - 中立/部分相关 (neutral)：提到了相关实体，但没有给出明确的真假验证信息 (+2分)
+       - 无关/废话 (irrelevant)：完全无关，或者纯粹重复声明且无增量信息 (-5分)
     
-    CRITICAL RULES FOR EVALUATION:
-    1. DO NOT give high scores just because the evidence contains the same entities, keywords, or topics as the claim.
-    2. The evidence must logically, explicitly, and substantially prove why the claim's true label is '{ground_truth}'.
-    3. If the evidence is useless background noise, mere overlap, or contradicts the true label, you must ruthlessly penalize it.
-    4. 🚨 DIVERSITY PENALTY: You MUST check if the 5 sentences are highly repetitive. If they lack diversity, give -5 or -10 R_global. Good evidence pieces together a diverse picture.
-    
-    Please evaluate and provide two scores:
-    1. R_global (Global Reward): 
-       - Give +10 ONLY IF the evidence provides explicit, DIVERSE, and critical proof aligning with the true label.
-       - Give -10 if the evidence is misleading, purely useless keyword overlap, or HIGHLY REPETITIVE.
-       - Give 0 if it's completely irrelevant but not harmful.
-    2. R_fine (Fine-grained Reward): Rate the evidence's true logical density and diversity on a scale of 0 to 5.
-    
-    Output strictly in the following JSON format:
+    2. 计算 R_global (全局奖励)：
+       - 基础分：上述 5 句话的得分总和。
+       - 🚨 对比式多样性惩罚：如果这 5 句话高度同质化（都在说同一句废话或提供重复视角），在基础分上额外扣除 10 分！好的证据链应该是多角度的。
+
+    3. 给出 R_fine (细粒度奖励)：评估这组证据的整体逻辑密度 (0到5分)。
+
+    请严格输出以下 JSON 格式：
     {{
-        "rationale": "Briefly analyze if the evidence provides diverse, actual logical proof...",
-        "R_global": 10,
-        "R_fine": 4
+        "sentence_stances": ["refute", "irrelevant", "support", "neutral", "irrelevant"],
+        "rationale": "简短分析这5句话的立场分布以及是否同质化...",
+        "R_global": 12,
+        "R_fine": 3
     }}
     """
     
@@ -83,7 +105,7 @@ def get_reward_from_llm(claim_idx, claim_text, ground_truth, selected_sentences)
                     {"role": "user", "content": prompt}
                 ],
                 response_format={"type": "json_object"},
-                temperature=0.1,
+                temperature=0.0,  
                 timeout=15 
             )
             result_str = response.choices[0].message.content
@@ -93,15 +115,20 @@ def get_reward_from_llm(claim_idx, claim_text, ground_truth, selected_sentences)
                 time.sleep(2) 
             else:
                 print(f"\n[Claim {claim_idx}] API 打分报错: {e}")
-                return {"R_global": -10, "R_fine": 0}
+                return {
+                    "sentence_stances": ["error"] * 5,
+                    "rationale": "API Timeout or Error",
+                    "R_global": -10, 
+                    "R_fine": 0
+                }
 
 def main():
-    parser = argparse.ArgumentParser(description="调用 DeepSeek 生成 RL 奖励信号")
+    parser = argparse.ArgumentParser(description="调用 DeepSeek 生成 RL 奖励信号 (自适应对比打分版)")
     parser.add_argument("--dataset", type=str, default="RAWFC", choices=["LIAR-RAW", "RAWFC"])
     args = parser.parse_args()
     dataset_name = args.dataset
     
-    print(f"\n▶️ 开启大模型离线打分 (带文本净化器)，当前目标数据集: 【{dataset_name}】\n")
+    print(f"\n▶️ 开启大模型离线打分 (自适应双数据集模式)，当前目标数据集: 【{dataset_name}】\n")
 
     input_path = os.path.join(project_root, "datasets", dataset_name, "rl_offline_buffer_train_features.json")
     output_path = os.path.join(project_root, "datasets", dataset_name, "rl_offline_buffer_with_rewards.jsonl") 
@@ -152,7 +179,8 @@ def main():
                 
             selected_sentences = [candidate_pool[i] for i in sampled_indices]
             
-            reward_scores = get_reward_from_llm(claim_idx, claim_text, truth_label, selected_sentences)
+            # 🌟 传入 dataset_name 参数，动态匹配真实标签含义
+            reward_scores = get_reward_from_llm(claim_idx, claim_text, truth_label, selected_sentences, dataset_name)
             
             alpha, beta = 1.0, 1.0
             total_reward = alpha * reward_scores.get("R_global", 0) + beta * reward_scores.get("R_fine", 0)
@@ -172,7 +200,7 @@ def main():
             
         pbar.close()
         
-    print(f"\n🎉 大功告成！{dataset_name} 的经验池数据均已打分完毕！\n保存在: {output_path}")
+    print(f"\n🎉 大功告成！{dataset_name} 的双向立场经验池数据均已打分完毕！\n保存在: {output_path}")
 
 if __name__ == '__main__':
     main()

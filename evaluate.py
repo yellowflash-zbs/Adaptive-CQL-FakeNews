@@ -20,10 +20,20 @@ from core.logger import setup_logger
 import warnings
 warnings.filterwarnings("ignore")
 
+# 🌟 终极优化 1：锁死所有随机种子，保证每次运行结果 100% 一致！
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(SEED)
+
 # ================= 配置区 =================
-# 🚨 填入你的真实 API Key！
-DEEPSEEK_API_KEY = "your_api_key_here" 
-client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
+# 从环境变量读取 API Key，避免把密钥提交到 GitHub。
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+if not DEEPSEEK_API_KEY:
+    raise RuntimeError("请先设置环境变量 DEEPSEEK_API_KEY，再运行 evaluate.py")
+client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"))
 # ==========================================
 
 def clean_spaced_text(text):
@@ -34,19 +44,17 @@ def clean_spaced_text(text):
         return " ".join(cleaned_words)
     return text
 
-# 🌟 修复：自适应数量，句子不够 5 句就全拿
 def get_random_top5(num_candidates):
     if num_candidates == 0: return []
-    k = min(1, num_candidates)
+    k = min(5, num_candidates)
     indices = np.arange(num_candidates)
     np.random.shuffle(indices)
     return indices[:k]
 
-# 🌟 修复：自适应数量
 def get_cosine_top5(claim_vec, cand_vecs):
     num_candidates = len(cand_vecs)
     if num_candidates == 0: return []
-    k = min(1, num_candidates)
+    k = min(5, num_candidates)
     
     vector_dim = 768
     scores = []
@@ -66,11 +74,10 @@ def get_cosine_top5(claim_vec, cand_vecs):
             scores.append(cos_sim)
     return np.argsort(scores)[-k:][::-1]
 
-# 🌟 修复：自适应数量，完美避免报错
-def get_rl_top5_mmr(action_scores, cand_vecs, lambda_mmr=0.6):
+def get_rl_top5_mmr(action_scores, cand_vecs, lambda_mmr=0.5):
     num_cands = len(cand_vecs)
     if num_cands == 0: return []
-    k = min(1, num_cands)
+    k = min(5, num_cands)
     
     vector_dim = 768
     unselected = list(range(num_cands))
@@ -114,7 +121,6 @@ def get_rl_top5_mmr(action_scores, cand_vecs, lambda_mmr=0.6):
     return selected
 
 def get_prediction_from_llm(claim_text, selected_sentences, dataset_name):
-    # 如果实在没有句子，大模型只能盲猜
     if not selected_sentences:
         evidence_text = "No evidence available."
     else:
@@ -124,43 +130,52 @@ def get_prediction_from_llm(claim_text, selected_sentences, dataset_name):
     
     clean_claim = clean_spaced_text(claim_text)
     
+    # 🌟 核心优化：自适应双数据集 Prompt 切换
     if dataset_name == "LIAR-RAW":
         options = "['pants-fire', 'false', 'barely-true', 'half-true', 'mostly-true', 'true']"
+        calibration_text = """
+    [用于校准你判决尺度的 LIAR 六分类标准]
+    - pants-fire (极其荒谬的谎言): 声明完全不准确，且错得离谱。
+    - false (错误): 声明不准确。
+    - barely-true (勉强真实): 声明包含一点事实，但忽略了会给人留下不同印象的关键事实。
+    - half-true (半真半假): 声明部分准确，但遗漏了重要细节或断章取义。
+    - mostly-true (基本真实): 声明准确，但需要澄清或补充信息。
+    - true (完全真实): 声明准确且没有遗漏任何重要内容。
+        """
     else:
         options = "['false', 'true', 'half']"
+        calibration_text = """
+    [用于校准你判决尺度的经典案例 (RAWFC 三分类)]
+    - 声明: "新税法降低了所有人的税收。" | 证据: "该法律降低了中产阶级的税收，但提高了前1%富人的税收。" | 判决: half
+    - 声明: "市长贪污了100万美元。" | 证据: "权威审计报告显示，所有市政资金的账目都完全清楚，未见异常。" | 判决: false
+        """
 
     prompt = f"""
-    You are an elite, highly skeptical fact-checker. 
-    Your task is to verify a news claim based STRICTLY on the provided evidence sentences.
-    
-    [CRITICAL EXAMPLES FOR CALIBRATION]
-    - Claim: "The new tax law lowers taxes for everyone."
-    - Evidence: "The law lowers taxes for the middle class, but raises them for the top 1%."
-    - Prediction: half
-    
-    - Claim: "The mayor stole $1 million."
-    - Evidence: "Audit shows all city funds are fully accounted for."
-    - Prediction: false
-    
-    - Claim: "Water boils at 100C."
-    - Evidence: "Scientific consensus proves water boils at 100C at sea level."
-    - Prediction: true
+    你是一位顶尖的、逻辑极其严密的假新闻核查法官，正在审理一桩复杂的案件。
+    你的任务是根据法庭上双方提交的证据，来综合裁决一条新闻声明的真伪。
+    {calibration_text}
 
-    === NOW EVALUATE THE FOLLOWING ===
+    === 现在请审理以下案件 ===
     
-    [NEWS CLAIM]: "{clean_claim}"
+    [新闻声明]: "{clean_claim}"
     
-    [RETRIEVED EVIDENCE]:
+    [法庭提交的证据]:
     {evidence_text}
     
-    STEP 1: Analyze the evidence step-by-step. Does it fully support, partially support, or explicitly contradict the claim? Is there enough context?
-    STEP 2: Based on your analysis, classify the claim into exactly ONE of the following categories:
+    步骤 1: 交叉盘问 (Cross-Examination)。
+    绝不能把这些证据当成单方面的话术来轻信。你必须主动寻找证据中的【冲突】和【视角差异】。 
+    - 证据中是否有强烈【支持】该声明的铁证？
+    - 证据中是否有强烈【反驳】该声明的铁证？
+    - 如果证据之间互相矛盾、指向不同，请像法官一样权衡它们的可靠性，并明确对比“正方”与“反方”的逻辑。
+    (注意：如果提供的证据完全无关或无法证明声明，请根据你的推理，推断最可能的分类，而不是随意乱猜)。
+    
+    步骤 2: 基于你交叉盘问后的综合判断，将该声明严格归类为以下选项中的【唯一】一个：
     {options}
     
-    Output strictly in the following JSON format:
+    请严格按照以下 JSON 格式输出（注意：为了系统能正确读取，JSON 的键名必须保持英文）：
     {{
-        "step_by_step_analysis": "Your detailed reasoning here...",
-        "prediction": "the chosen category"
+        "step_by_step_analysis": "请写下你交叉盘问正反方证据的详细推理过程...",
+        "prediction": "填入你最终选定的类别"
     }}
     """
     
@@ -174,7 +189,7 @@ def get_prediction_from_llm(claim_text, selected_sentences, dataset_name):
                     {"role": "user", "content": prompt}
                 ],
                 response_format={"type": "json_object"},
-                temperature=0,  
+                temperature=0.0,  
                 timeout=20 
             )
             result = json.loads(response.choices[0].message.content)
@@ -183,6 +198,7 @@ def get_prediction_from_llm(claim_text, selected_sentences, dataset_name):
             if attempt < max_retries - 1:
                 time.sleep(2) 
             else:
+                print(f"  [Error] LLM API 评测请求失败: {e}")
                 return {"prediction": "unknown", "step_by_step_analysis": str(e)}
 
 def parse_label_to_int(lbl_str, dataset_name):
@@ -215,7 +231,7 @@ def main():
     args = parser.parse_args()
     dataset_name = args.dataset 
     
-    print(f"\n🚀 正在启动【大模型法官】多基线评测流水线 (满血无截断版)，当前数据集: 【{dataset_name}】")
+    print(f"\n🚀 正在启动【大模型法官】多基线评测流水线 (满血自适应版)，当前数据集: 【{dataset_name}】")
     os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
     setup_logger(log_dir="logs", prefix=f"evaluate_llm_judge_{dataset_name}")
@@ -234,18 +250,29 @@ def main():
     with open(test_path, 'r', encoding='utf-8') as f:
         all_items = json.load(f)
     
-    random.seed(42) 
     random.shuffle(all_items)
     
     try:
         for item in tqdm(all_items, desc="Evaluating Baselines on Test Set"):
-            cand_vecs = item["candidate_vectors"]
-            # 🚨 终极修复：彻底删除了 if len(cand_vecs) < 5: continue ！！！
-                
+            raw_cand_vecs = item["candidate_vectors"]
+            raw_candidate_pool = item["candidate_sentences"]
             claim_vec = item["claim_vector"]
-            candidate_pool = item["candidate_sentences"]
             claim_text = item.get("claim_text", item.get("claim", "UNKNOWN CLAIM"))
             raw_truth = item["ground_truth_label"]
+            
+            cand_vecs = []
+            candidate_pool = []
+            seen_texts = set()
+            
+            for vec, text in zip(raw_cand_vecs, raw_candidate_pool):
+                clean_t = clean_spaced_text(text).lower()
+                if clean_t not in seen_texts and len(clean_t) > 10:  
+                    seen_texts.add(clean_t)
+                    cand_vecs.append(vec)
+                    candidate_pool.append(text)
+            
+            if len(cand_vecs) == 0:
+                continue
             
             y_true = parse_label_to_int(raw_truth, dataset_name)
             if y_true == -1:
@@ -262,11 +289,10 @@ def main():
             pred_cosine = parse_label_to_int(dict_cosine.get("prediction", "unknown"), dataset_name)
             
             state_vec = build_state_vector(claim_vec, cand_vecs)
-            # 即使小于5句，神经网络依然能输出分数，我们按切片取即可
             action, _ = policy.get_action(state_vec) 
             action_scores = action[:len(cand_vecs)] 
             
-            idx_rl = get_rl_top5_mmr(action_scores, cand_vecs, lambda_mmr=1.0   )
+            idx_rl = get_rl_top5_mmr(action_scores, cand_vecs, lambda_mmr=0.5)
             sent_rl = [candidate_pool[i] for i in idx_rl] if len(idx_rl) > 0 else []
             dict_rl = get_prediction_from_llm(claim_text, sent_rl, dataset_name)
             pred_rl = parse_label_to_int(dict_rl.get("prediction", "unknown"), dataset_name)

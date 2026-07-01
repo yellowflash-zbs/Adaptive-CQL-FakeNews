@@ -71,9 +71,13 @@ def main():
     action_dim = dataset['actions'].shape[1]   
     
     dataset['actions'] = dataset['actions'] * 2.0 - 1.0 
+    
+    # =========================================================
+    # 🌟 绝杀修复 1：强行归一化奖励，防止梯度爆炸！把 +10 变成 +1.0
+    # =========================================================
+    dataset['rewards'] = dataset['rewards'] / 10.0 
 
     print("🧠 正在构建 Actor-Critic 神经网络 (已为您瘦身为 256 以防过拟合)...")
-    # 🌟 修复点 1：网络瘦身，防止死记硬背
     hidden_sizes = [256, 256, 256] 
     
     qf1 = ConcatMlp(input_size=obs_dim + action_dim, output_size=1, hidden_sizes=hidden_sizes)
@@ -90,9 +94,6 @@ def main():
     print("⚙️ 初始化 AdaptiveCQLTrainer...")
     dummy_env = DummyEnv(action_dim)
     
-    print("⚙️ 初始化 AdaptiveCQLTrainer...")
-    dummy_env = DummyEnv(action_dim)
-    
     trainer = AdaptiveCQLTrainer(
         env=dummy_env,
         policy=policy,
@@ -101,35 +102,28 @@ def main():
         target_qf1=target_qf1,
         target_qf2=target_qf2,
         bc_model_path=bc_model_path, 
-        kl_scale=0.2,            # 🌟 修复 1：降低惩罚系数，防止压垮 Q 值
-        policy_lr=1e-4,
+        # =========================================================
+        # 🌟 绝杀修复 2：奖励缩小了，保守惩罚也要等比例降到极低！学习率调稳
+        # =========================================================
+        kl_scale=0.010,           
+        policy_lr=3e-5,          
         qf_lr=3e-4,
         reward_scale=1.0,
         automatic_entropy_tuning=True,
-        # =========================================================
-        # 🌟 神级修复 2：斩断自举噪声！证据选取是单步决策，绝对不能看 next_obs！
         discount=0.0,
-        # 🌟 神级修复 3：关闭维度诅咒！防止 60 维动作空间产生的 +41 荒谬常数压垮网络！
         min_q_version=2,
-        # =========================================================
     )
     for net in trainer.networks:
         net.to(ptu.device)
 
-    print("\n🚀 开始闭关修炼：加入动态早停机制的 RL 训练...")
+    print("\n🚀 开始闭关修炼：执行完整 100 Epoch 的离线强化学习...")
     total_data_size = dataset['observations'].shape[0]
     
-    # 🌟 修复点 2：早停机制监控变量
-    best_loss = float('inf')
-    patience_counter = 0
-    PATIENCE_LIMIT = 15  # 如果 15 轮没进步，果断停车！
-    
-    # 🌟 强行伪装成 epoch_100，为了完美兼容你的 evaluate.py
     best_save_path = os.path.join(checkpoint_dir, f"{dataset_name}_adaptive_cql_policy_epoch_100.pth")
 
     for epoch in range(NUM_EPOCHS):
         pbar = tqdm(range(NUM_TRAIN_STEPS_PER_EPOCH), desc=f"Epoch {epoch+1}/{NUM_EPOCHS}")
-        epoch_q_losses = [] # 记录这一轮的误差
+        epoch_q_losses = [] 
         
         for step in pbar:
             indices = np.random.randint(0, total_data_size, size=BATCH_SIZE)
@@ -154,21 +148,15 @@ def main():
             
         trainer.end_epoch(epoch) 
         
-        # 🌟 修复点 3：评估并保存巅峰状态的权重
+        # =========================================================
+        # 🌟 绝杀修复 3：废除 Q-Loss 早停陷阱！老老实实每 10 轮或最后一轮保存
+        # =========================================================
         mean_q_loss = np.mean(epoch_q_losses)
-        if mean_q_loss < best_loss:
-            best_loss = mean_q_loss
-            patience_counter = 0
+        print(f"   当前 Epoch {epoch+1} 平均 Q-Loss: {mean_q_loss:.4f}")
+        
+        if (epoch + 1) % 10 == 0 or epoch == NUM_EPOCHS - 1:
             torch.save(policy.state_dict(), best_save_path)
-            print(f"   🏆 发现更优模型！Q-Loss 降至 {best_loss:.4f}，已保存巅峰权重！")
-        else:
-            patience_counter += 1
-            print(f"   ⚠️ 模型未进步 (Patience: {patience_counter}/{PATIENCE_LIMIT})")
-            
-        # 触发早停
-        if patience_counter >= PATIENCE_LIMIT:
-            print(f"\n🛑 触发早停机制！连续 {PATIENCE_LIMIT} 轮未进步，防止过拟合，提前结束训练！")
-            break
+            print(f"   💾 已覆盖保存最新权重至: {best_save_path}")
 
     print(f"\n🎉 训练彻底完成！最强泛化模型已定格在: {best_save_path}")
 

@@ -2,6 +2,7 @@
 datasets/
 checkpoints/
 logs/
+backups/
 
 # 忽略 Python 缓存
 __pycache__/

@@ -154,12 +154,13 @@ def build_evidence_bundles(claim_vec, cand_vecs, action_scores=None):
     }
 
 
-def bundle_state_features(claim_vec, cand_vecs, action_scores=None):
+def bundle_state_features(claim_vec, cand_vecs, action_scores=None, candidate_sentences=None):
     cos_scores = cosine_scores(claim_vec, cand_vecs)
     if action_scores is None or len(action_scores) == 0:
         action_scores = np.zeros(len(cand_vecs), dtype=np.float32)
     action_scores = np.array(action_scores, dtype=np.float32)
-    lengths = np.array([len(clean_spaced_text(v).split()) for v in [""] * len(cand_vecs)], dtype=np.float32)
+    candidate_sentences = candidate_sentences or []
+    lengths = np.array([len(clean_spaced_text(text).split()) for text in candidate_sentences], dtype=np.float32)
     num_candidates = float(len(cand_vecs))
 
     def stats(values):

@@ -27,3 +27,10 @@
 ### 当前问题
 - 项目中 `d4rl/rlkit` 目录包含大量与本课题无关的强化学习算法、环境、示例和历史输出，代码结构过重。
 - 下一步需要整理强化学习代码，只保留当前项目真正需要的 Adaptive CQL / bundle-level CQL 相关代码。
+
+### 强化学习代码瘦身
+- 已在删除前备份完整 `d4rl/` 目录到 `backups/pre_d4rl_delete_20260701_130142`。
+- 将当前项目真正需要的 RL 组件迁移到项目内轻量模块：`core/simple_rl.py` 和 `core/adaptive_cql.py`。
+- 保留的强化学习方法：句子级 Adaptive CQL、bundle-level 离线 CQL / contextual bandit 控制器。
+- 删除的冗余内容：`d4rl/rlkit` 中与本课题无关的 AWAC、BC、IQL、SAC、TD3、HER、SMAC、SkewFit、Mujoco 环境、示例脚本、历史输出等。
+- 已验证 `train.py --help`、`evaluate.py --help`、Python 语法检查和 RAWFC 旧 CQL checkpoint 加载均正常。

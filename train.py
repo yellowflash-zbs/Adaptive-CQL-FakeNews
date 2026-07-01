@@ -2,30 +2,16 @@
 import os
 import sys
 import argparse
-import types
 import pickle
 import torch
 import numpy as np
 from tqdm import tqdm
 
-# ====================================================================
-# 1. 动态获取根目录并正确挂载 d4rl
-# ====================================================================
 current_dir = os.path.dirname(os.path.abspath(__file__))
-d4rl_path = os.path.join(current_dir, "d4rl")
-if d4rl_path not in sys.path:
-    sys.path.append(d4rl_path)
 
-# ====== 🌟 神级欺骗术：绕过 Windows 上的 d4rl 物理引擎安装地狱 ======
-sys.modules['d4rl'] = types.ModuleType('d4rl')
-# ====================================================================
-
-# 只有在成功挂载 d4rl 之后，才能导入 rlkit
-import rlkit.torch.pytorch_util as ptu
-from rlkit.torch.networks.mlp import ConcatMlp
-from rlkit.torch.sac.policies import TanhGaussianPolicy
-# 导入你的自适应 CQL Trainer
-from rlkit.torch.sac.adaptive_cql import AdaptiveCQLTrainer 
+import core.simple_rl as ptu
+from core.simple_rl import ConcatMlp, TanhGaussianPolicy
+from core.adaptive_cql import AdaptiveCQLTrainer
 
 class DummyActionSpace:
     def __init__(self, dim):

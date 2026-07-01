@@ -23,8 +23,8 @@ class DualLogger(object):
         self.log = open(log_file, "a", encoding="utf-8")
         
         # 提前在终端打个招呼
-        self.terminal.write(f"📝 [系统日志] 终端输出将实时同步保存至: {log_file}\n\n")
-        self.log.write(f"=== 🚀 实验启动时间: {current_time} ===\n\n")
+        self.terminal.write(f"[系统日志] 终端输出将实时同步保存至: {log_file}\n\n")
+        self.log.write(f"=== 实验启动时间: {current_time} ===\n\n")
 
     def write(self, message):
         # 屏幕打印一份

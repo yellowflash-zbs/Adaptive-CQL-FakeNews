@@ -26,6 +26,11 @@ from core.bundle_policy import DiscreteCQLPolicy
 from core.evidence_selection import ACTION_NAMES
 
 
+def bundle_filename(split_name, input_suffix):
+    suffix = f"_{input_suffix}" if input_suffix else ""
+    return f"evidence_bundle_candidates_{split_name}{suffix}.jsonl"
+
+
 def load_bundle_records(path):
     records = []
     with open(path, "r", encoding="utf-8") as f:
@@ -88,13 +93,15 @@ def main():
     parser.add_argument("--hidden-size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--cql-alpha", type=float, default=0.2)
+    parser.add_argument("--input-suffix", default="", help="读取候选文件后缀，例如 debug10")
+    parser.add_argument("--output-suffix", default="", help="checkpoint 文件后缀，例如 debug10")
     args = parser.parse_args()
 
     input_path = os.path.join(
         project_root,
         "datasets",
         args.dataset,
-        f"evidence_bundle_candidates_{args.split}.jsonl",
+        bundle_filename(args.split, args.input_suffix),
     )
     records = load_bundle_records(input_path)
     states, actions, rewards, mean, std = records_to_tensors(records)
@@ -137,7 +144,8 @@ def main():
 
     checkpoint_dir = os.path.join(project_root, "checkpoints")
     os.makedirs(checkpoint_dir, exist_ok=True)
-    output_path = os.path.join(checkpoint_dir, f"{args.dataset}_bundle_cql_policy.pth")
+    output_suffix = f"_{args.output_suffix}" if args.output_suffix else ""
+    output_path = os.path.join(checkpoint_dir, f"{args.dataset}_bundle_cql_policy{output_suffix}.pth")
     torch.save(
         {
             "model_state_dict": model.state_dict(),

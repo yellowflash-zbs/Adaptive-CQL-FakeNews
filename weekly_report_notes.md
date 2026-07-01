@@ -38,3 +38,12 @@
 ### 日报记录规范
 - 后续每天完成开发或实验后，生成一份 `.md` 日报，统一保存到 `reports/daily/`。
 - 周一生成正式周报时，优先根据这些每日记录进行整合，避免遗漏实验过程、代码提交、备份位置和验证结果。
+
+### 证据包生成流程加固
+- 发现 RAWFC / LIAR-RAW 的特征文件体积较大，原脚本一次性 `json.load` 容易占用大量内存。
+- 将 `scripts/generate_evidence_bundles.py` 改为流式读取 JSON 数组，支持小样本调试时只处理前 N 条。
+- 增加 `--output-suffix` 与 `--overwrite`，避免调试运行覆盖正式候选文件。
+- 将 `scripts/train_bundle_policy.py` 增加 `--input-suffix` 和 `--output-suffix`，方便用调试候选文件训练临时 bundle policy。
+- 将 `evaluate.py` 改为流式读取特征文件，并支持 `--bundle-policy-suffix` 与 `--dry-run-selection`，便于在不调用 DeepSeek 的情况下检查证据路由。
+- 新增 `core/json_stream.py`，统一维护大 JSON 数组流式读取逻辑，避免生成脚本和评估脚本重复实现。
+- 修复 `core/logger.py` 在 Windows GBK 终端下因 emoji 输出导致的编码错误。

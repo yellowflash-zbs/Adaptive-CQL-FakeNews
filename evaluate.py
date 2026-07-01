@@ -40,6 +40,7 @@ from core.evidence_selection import (
     cosine_scores,
     mmr_indices,
 )
+from core.json_stream import iter_json_array
 from core.label_utils import int_to_label, label_options, parse_label_to_int
 from core.llm_judge import PROMPT_VERSION, judge_stances, judge_verdict
 from core.logger import setup_logger
@@ -60,8 +61,7 @@ def load_feature_items(dataset_name, split_name):
     path = os.path.join("datasets", dataset_name, f"rl_offline_buffer_{split_name}_features.json")
     if not os.path.exists(path):
         raise FileNotFoundError(f"找不到特征文件: {path}")
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    return path
 
 
 def select_indices_for_mode(mode, claim_vec, cand_vecs, cand_sentences, rng, cql_policy=None, bundle_policy=None, bundle_ckpt=None):
@@ -151,9 +151,11 @@ def main():
     parser.add_argument("--limit", type=int, default=0, help="调试用：只评估前 N 条，0 表示全量")
     parser.add_argument("--prompt-version", default=PROMPT_VERSION)
     parser.add_argument("--seed", type=int, default=SEED)
+    parser.add_argument("--bundle-policy-suffix", default="", help="bundle policy checkpoint 后缀，例如 debug2")
+    parser.add_argument("--dry-run-selection", action="store_true", help="只检查证据选择流程，不调用 DeepSeek")
     args = parser.parse_args()
 
-    if not os.getenv("DEEPSEEK_API_KEY"):
+    if not args.dry_run_selection and not os.getenv("DEEPSEEK_API_KEY"):
         raise RuntimeError("请先设置环境变量 DEEPSEEK_API_KEY，再运行 evaluate.py")
 
     set_seed(args.seed)
@@ -165,6 +167,7 @@ def main():
     print(f"mode={args.mode}")
     print(f"seed={args.seed}")
     print(f"prompt_version={args.prompt_version}")
+    print(f"dry_run_selection={args.dry_run_selection}")
     print("RAWFC best baseline: kl_scale=0.01, Top-K=5, lambda=0.5, temperature=0")
     print("LIAR-RAW current fallback: Top-K=3, lambda=0.8 for noisy evidence pools")
 
@@ -179,21 +182,21 @@ def main():
 
     bundle_policy, bundle_ckpt = None, None
     if args.mode == "bundle_rl":
-        bundle_weight = os.path.join("checkpoints", f"{args.dataset}_bundle_cql_policy.pth")
+        suffix = f"_{args.bundle_policy_suffix}" if args.bundle_policy_suffix else ""
+        bundle_weight = os.path.join("checkpoints", f"{args.dataset}_bundle_cql_policy{suffix}.pth")
         if not os.path.exists(bundle_weight):
             raise FileNotFoundError(f"找不到 bundle policy 权重: {bundle_weight}")
         bundle_policy, bundle_ckpt = load_bundle_policy(bundle_weight)
 
-    items = load_feature_items(args.dataset, args.split)
-    random.shuffle(items)
-    if args.limit > 0:
-        items = items[: args.limit]
+    feature_path = load_feature_items(args.dataset, args.split)
+    print(f"feature_path={feature_path}")
+    items = iter_json_array(feature_path, limit=args.limit)
 
     rng = np.random.default_rng(args.seed)
     y_true, y_pred = [], []
     case_studies = []
 
-    for item in tqdm(items, desc=f"Evaluating {args.mode}"):
+    for item in tqdm(items, total=args.limit or None, desc=f"Evaluating {args.mode}"):
         cand_vecs, cand_sentences = deduplicate_candidates(
             item["candidate_vectors"],
             item["candidate_sentences"],
@@ -219,6 +222,19 @@ def main():
             bundle_ckpt=bundle_ckpt,
         )
         selected_evidence = [cand_sentences[idx] for idx in selected_indices]
+
+        if args.dry_run_selection:
+            case_studies.append(
+                {
+                    "claim_index": item["claim_index"],
+                    "claim_text": clean_spaced_text(claim_text),
+                    "ground_truth_label": gold_label,
+                    "selected_action": selected_action,
+                    "selected_indices": selected_indices,
+                    "selected_evidence": selected_evidence,
+                }
+            )
+            continue
 
         stance_labels = []
         if args.mode in {"defense_judge", "bundle_rl"} and selected_evidence:
@@ -250,9 +266,19 @@ def main():
             }
         )
 
-    metrics = evaluate_results(y_true, y_pred, args.dataset)
+    if args.dry_run_selection:
+        metrics = {
+            "dry_run_selection": True,
+            "num_cases": len(case_studies),
+            "selected_action_distribution": dict(Counter(c["selected_action"] for c in case_studies)),
+        }
+        print("\nDry run completed. No DeepSeek calls were made.")
+        print("selected_action_distribution:", metrics["selected_action_distribution"])
+    else:
+        metrics = evaluate_results(y_true, y_pred, args.dataset)
 
-    output_path = os.path.join("logs", f"case_study_{args.dataset}_{args.split}_{args.mode}.json")
+    dry_suffix = "_dryrun" if args.dry_run_selection else ""
+    output_path = os.path.join("logs", f"case_study_{args.dataset}_{args.split}_{args.mode}{dry_suffix}.json")
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(
             {

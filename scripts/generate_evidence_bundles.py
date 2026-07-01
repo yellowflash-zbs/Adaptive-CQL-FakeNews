@@ -24,16 +24,21 @@ from core.evidence_selection import (
     deduplicate_candidates,
     rl_action_scores,
 )
+from core.json_stream import iter_json_array
 from core.label_utils import evidence_quality_reward, noise_penalty, verdict_reward
 from core.llm_judge import PROMPT_VERSION, judge_stances, judge_verdict
 
 
-def load_items(dataset_name, split_name):
+def feature_path(dataset_name, split_name):
     path = os.path.join(project_root, "datasets", dataset_name, f"rl_offline_buffer_{split_name}_features.json")
     if not os.path.exists(path):
         raise FileNotFoundError(f"找不到特征文件: {path}")
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    return path
+
+
+def output_filename(split_name, output_suffix):
+    suffix = f"_{output_suffix}" if output_suffix else ""
+    return f"evidence_bundle_candidates_{split_name}{suffix}.jsonl"
 
 
 def main():
@@ -43,7 +48,13 @@ def main():
     parser.add_argument("--limit", type=int, default=0, help="调试用：只处理前 N 条，0 表示全量")
     parser.add_argument("--skip-llm", action="store_true", help="只生成证据包，不调用 DeepSeek 打分")
     parser.add_argument("--prompt-version", default=PROMPT_VERSION)
+    parser.add_argument("--output-suffix", default="", help="输出文件后缀，例如 debug10 会生成 *_debug10.jsonl")
+    parser.add_argument("--overwrite", action="store_true", help="允许覆盖已有候选文件")
     args = parser.parse_args()
+
+    output_suffix = args.output_suffix
+    if args.limit > 0 and not output_suffix:
+        output_suffix = f"debug{args.limit}"
 
     weight_path = os.path.join(project_root, "checkpoints", f"{args.dataset}_adaptive_cql_policy_epoch_100.pth")
     if not os.path.exists(weight_path):
@@ -52,24 +63,26 @@ def main():
     from core.cql_agent import load_adaptive_cql_policy
 
     policy = load_adaptive_cql_policy(weight_path=weight_path)
-    items = load_items(args.dataset, args.split)
-    if args.limit > 0:
-        items = items[: args.limit]
+    input_path = feature_path(args.dataset, args.split)
 
     output_path = os.path.join(
         project_root,
         "datasets",
         args.dataset,
-        f"evidence_bundle_candidates_{args.split}.jsonl",
+        output_filename(args.split, output_suffix),
     )
+    if os.path.exists(output_path) and not args.overwrite:
+        raise FileExistsError(f"输出文件已存在，请加 --overwrite 或换 --output-suffix: {output_path}")
 
-    print(f"dataset={args.dataset} split={args.split} items={len(items)}")
+    print(f"dataset={args.dataset} split={args.split} limit={args.limit}")
+    print(f"input={input_path}")
     print(f"actions={ACTION_NAMES}")
     print(f"output={output_path}")
     print(f"skip_llm={args.skip_llm} prompt_version={args.prompt_version}")
 
     with open(output_path, "w", encoding="utf-8") as f_out:
-        for item in tqdm(items, desc="Generating evidence bundles"):
+        items = iter_json_array(input_path, limit=args.limit)
+        for item in tqdm(items, total=args.limit or None, desc="Generating evidence bundles"):
             cand_vecs, cand_sentences = deduplicate_candidates(
                 item["candidate_vectors"],
                 item["candidate_sentences"],

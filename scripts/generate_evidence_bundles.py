@@ -17,7 +17,6 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from core.cql_agent import load_adaptive_cql_policy
 from core.evidence_selection import (
     ACTION_NAMES,
     build_evidence_bundles,
@@ -49,6 +48,8 @@ def main():
     weight_path = os.path.join(project_root, "checkpoints", f"{args.dataset}_adaptive_cql_policy_epoch_100.pth")
     if not os.path.exists(weight_path):
         raise FileNotFoundError(f"找不到 CQL 权重: {weight_path}")
+
+    from core.cql_agent import load_adaptive_cql_policy
 
     policy = load_adaptive_cql_policy(weight_path=weight_path)
     items = load_items(args.dataset, args.split)

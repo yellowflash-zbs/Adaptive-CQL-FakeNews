@@ -5,8 +5,6 @@ import json
 import os
 import time
 
-from openai import OpenAI
-
 from core.evidence_selection import clean_spaced_text
 
 
@@ -14,6 +12,8 @@ PROMPT_VERSION = "defense_v1"
 
 
 def get_deepseek_client():
+    from openai import OpenAI
+
     api_key = os.getenv("DEEPSEEK_API_KEY")
     if not api_key:
         raise RuntimeError("请先设置环境变量 DEEPSEEK_API_KEY，再运行需要 DeepSeek 的脚本。")

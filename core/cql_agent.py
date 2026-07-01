@@ -5,6 +5,7 @@
 """
 import os
 import sys
+import types
 import torch
 import numpy as np
 
@@ -14,11 +15,27 @@ project_root = os.path.dirname(current_dir)
 d4rl_path = os.path.join(project_root, "d4rl")
 if d4rl_path not in sys.path:
     sys.path.append(d4rl_path)
+
+# rlkit 的部分训练模块会导入 gtimer；评估阶段并不真正使用它。
+# 在没有安装 gtimer 的 Windows 环境中放一个轻量兼容模块，避免导入失败。
+if "gtimer" not in sys.modules:
+    gtimer_stub = types.ModuleType("gtimer")
+    gtimer_stub.stamp = lambda *args, **kwargs: None
+    gtimer_stub.timed_for = lambda iterable, *args, **kwargs: iterable
+    gtimer_stub.reset = lambda *args, **kwargs: None
+    sys.modules["gtimer"] = gtimer_stub
+
+# 这里只需要加载策略网络，不需要真实 gym/d4rl 环境。
+if "gym" not in sys.modules:
+    sys.modules["gym"] = types.ModuleType("gym")
+if "d4rl" not in sys.modules:
+    sys.modules["d4rl"] = types.ModuleType("d4rl")
+
 try:
     import rlkit.torch.pytorch_util as ptu
     from rlkit.torch.sac.policies import TanhGaussianPolicy
-except ImportError:
-    print("⚠️ 警告: 找不到 rlkit 模块，请确保 d4rl/rlkit 库正确配置在项目中。")
+except ImportError as exc:
+    raise ImportError("找不到 rlkit 模块，请确保 d4rl/rlkit 库正确配置在项目中。") from exc
 
 
 def load_adaptive_cql_policy(weight_path, obs_dim=46848, action_dim=60, hidden_sizes=[256, 256, 256], use_gpu=True):

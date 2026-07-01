@@ -34,3 +34,7 @@
 - 保留的强化学习方法：句子级 Adaptive CQL、bundle-level 离线 CQL / contextual bandit 控制器。
 - 删除的冗余内容：`d4rl/rlkit` 中与本课题无关的 AWAC、BC、IQL、SAC、TD3、HER、SMAC、SkewFit、Mujoco 环境、示例脚本、历史输出等。
 - 已验证 `train.py --help`、`evaluate.py --help`、Python 语法检查和 RAWFC 旧 CQL checkpoint 加载均正常。
+
+### 日报记录规范
+- 后续每天完成开发或实验后，生成一份 `.md` 日报，统一保存到 `reports/daily/`。
+- 周一生成正式周报时，优先根据这些每日记录进行整合，避免遗漏实验过程、代码提交、备份位置和验证结果。

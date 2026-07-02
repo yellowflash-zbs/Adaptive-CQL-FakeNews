@@ -57,8 +57,9 @@ def set_seed(seed):
         torch.cuda.manual_seed_all(seed)
 
 
-def load_feature_items(dataset_name, split_name):
-    path = os.path.join("datasets", dataset_name, f"rl_offline_buffer_{split_name}_features.json")
+def load_feature_items(dataset_name, split_name, feature_suffix=""):
+    suffix = f"_{feature_suffix}" if feature_suffix else ""
+    path = os.path.join("datasets", dataset_name, f"rl_offline_buffer_{split_name}_features{suffix}.json")
     if not os.path.exists(path):
         raise FileNotFoundError(f"找不到特征文件: {path}")
     return path
@@ -151,6 +152,7 @@ def main():
     parser.add_argument("--limit", type=int, default=0, help="调试用：只评估前 N 条，0 表示全量")
     parser.add_argument("--prompt-version", default=PROMPT_VERSION)
     parser.add_argument("--seed", type=int, default=SEED)
+    parser.add_argument("--feature-suffix", default="", help="输入特征文件后缀，例如 debug2")
     parser.add_argument("--bundle-policy-suffix", default="", help="bundle policy checkpoint 后缀，例如 debug2")
     parser.add_argument("--dry-run-selection", action="store_true", help="只检查证据选择流程，不调用 DeepSeek")
     args = parser.parse_args()
@@ -188,7 +190,7 @@ def main():
             raise FileNotFoundError(f"找不到 bundle policy 权重: {bundle_weight}")
         bundle_policy, bundle_ckpt = load_bundle_policy(bundle_weight)
 
-    feature_path = load_feature_items(args.dataset, args.split)
+    feature_path = load_feature_items(args.dataset, args.split, args.feature_suffix)
     print(f"feature_path={feature_path}")
     items = iter_json_array(feature_path, limit=args.limit)
 

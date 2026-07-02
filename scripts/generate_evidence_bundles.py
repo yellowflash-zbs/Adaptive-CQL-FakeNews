@@ -29,8 +29,9 @@ from core.label_utils import evidence_quality_reward, noise_penalty, verdict_rew
 from core.llm_judge import PROMPT_VERSION, judge_stances, judge_verdict
 
 
-def feature_path(dataset_name, split_name):
-    path = os.path.join(project_root, "datasets", dataset_name, f"rl_offline_buffer_{split_name}_features.json")
+def feature_path(dataset_name, split_name, feature_suffix=""):
+    suffix = f"_{feature_suffix}" if feature_suffix else ""
+    path = os.path.join(project_root, "datasets", dataset_name, f"rl_offline_buffer_{split_name}_features{suffix}.json")
     if not os.path.exists(path):
         raise FileNotFoundError(f"找不到特征文件: {path}")
     return path
@@ -48,6 +49,7 @@ def main():
     parser.add_argument("--limit", type=int, default=0, help="调试用：只处理前 N 条，0 表示全量")
     parser.add_argument("--skip-llm", action="store_true", help="只生成证据包，不调用 DeepSeek 打分")
     parser.add_argument("--prompt-version", default=PROMPT_VERSION)
+    parser.add_argument("--feature-suffix", default="", help="输入特征文件后缀，例如 debug2")
     parser.add_argument("--output-suffix", default="", help="输出文件后缀，例如 debug10 会生成 *_debug10.jsonl")
     parser.add_argument("--overwrite", action="store_true", help="允许覆盖已有候选文件")
     args = parser.parse_args()
@@ -63,7 +65,7 @@ def main():
     from core.cql_agent import load_adaptive_cql_policy
 
     policy = load_adaptive_cql_policy(weight_path=weight_path)
-    input_path = feature_path(args.dataset, args.split)
+    input_path = feature_path(args.dataset, args.split, args.feature_suffix)
 
     output_path = os.path.join(
         project_root,

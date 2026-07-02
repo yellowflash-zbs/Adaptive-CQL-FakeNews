@@ -4,3 +4,7 @@ scikit-learn
 ijson
 tqdm
 openai
+transformers
+nltk
+pandas
+rouge-score

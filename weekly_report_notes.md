@@ -47,3 +47,17 @@
 - 将 `evaluate.py` 改为流式读取特征文件，并支持 `--bundle-policy-suffix` 与 `--dry-run-selection`，便于在不调用 DeepSeek 的情况下检查证据路由。
 - 新增 `core/json_stream.py`，统一维护大 JSON 数组流式读取逻辑，避免生成脚本和评估脚本重复实现。
 - 修复 `core/logger.py` 在 Windows GBK 终端下因 emoji 输出导致的编码错误。
+
+## 2026.07.02
+
+### 实验运行流程规范
+- 用户要求：代码修改和检查可以由 Codex 完成，但到运行正式实验、调用 DeepSeek、训练模型和得到指标时，需要把实验步骤交给用户本人执行。
+- 新增实验步骤文档：`docs/experiment_steps_bundle_rl.md`，按顺序说明特征抽取、证据包候选生成、bundle policy 训练、dry-run、验证集评估和结果查看方式。
+- 明确当前阶段只使用验证集调参，测试集保留到最终确认配置后再运行一次。
+
+### 特征抽取脚本加固
+- 移除 `scripts/extract_features.py` 中硬编码的 `CUDA_VISIBLE_DEVICES=3`，避免在用户电脑上因显卡编号不一致导致失败。
+- 新增 `--device`、`--cuda-visible-devices`、`--limit`、`--output-suffix`、`--overwrite` 参数，方便用户先跑小样本检查，再跑全量。
+- 移除特征抽取脚本的 emoji 输出，降低 Windows 终端编码报错风险。
+- 补充 `requirements.txt`，加入特征抽取实际依赖的 `transformers`、`nltk`、`pandas`、`rouge-score`。
+- 为 `scripts/generate_evidence_bundles.py` 和 `evaluate.py` 增加 `--feature-suffix`，保证小样本调试特征文件可以继续用于后续证据包生成和 dry-run。

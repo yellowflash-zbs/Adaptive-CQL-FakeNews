@@ -13,26 +13,8 @@ model_path = os.path.join(project_root, 'model')
 if model_path not in sys.path:
     sys.path.insert(0, model_path)
 
-import json
 import argparse
-import torch
-from torch.utils.data import DataLoader
-from tqdm import tqdm
-
-# ==========================================
-# 🚨 终极核弹修复：覆盖底层大写 LABEL_IDS！
-# ==========================================
-import helpers.reader5 as reader5_module
-# 必须是大写的 LABEL_IDS，强行纠正底层的三分类映射
-reader5_module.LABEL_IDS = {"false": 0, "half": 1, "true": 2}
-
-from helpers.reader5 import myDataset
-from model_exp_fc5 import ExplainFC
-
-os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-os.environ["HTTP_PROXY"] = ""
-os.environ["HTTPS_PROXY"] = ""
-os.environ["CUDA_VISIBLE_DEVICES"] = "3" 
+import json
 
 BATCH_SIZE = 1 
 REPORT_EACH_CLAIM = 30
@@ -47,11 +29,29 @@ def main():
     parser = argparse.ArgumentParser(description="抽取文本特征向量")
     parser.add_argument("--dataset", type=str, default="RAWFC", choices=["LIAR-RAW", "RAWFC"])
     parser.add_argument("--split", type=str, default="test", choices=["train", "test", "val"])
+    parser.add_argument("--limit", type=int, default=0, help="调试用：只抽取前 N 条，0 表示全量")
+    parser.add_argument("--output-suffix", default="", help="输出文件后缀，例如 debug10")
+    parser.add_argument("--overwrite", action="store_true", help="允许覆盖已有特征文件")
+    parser.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"], help="运行设备")
+    parser.add_argument("--cuda-visible-devices", default="", help="指定可见 GPU，例如 0；留空则不修改")
+    parser.add_argument("--hf-endpoint", default=os.getenv("HF_ENDPOINT", "https://hf-mirror.com"))
     args = parser.parse_args()
     dataset_name = args.dataset
     split_name = args.split 
+
+    os.environ["HF_ENDPOINT"] = args.hf_endpoint
+    if args.cuda_visible_devices:
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda_visible_devices
+
+    import torch
+    from torch.utils.data import DataLoader
+    from tqdm import tqdm
+
+    import helpers.reader5 as reader5_module
+    from helpers.reader5 import myDataset
+    from model_exp_fc5 import ExplainFC
     
-    print(f"\n🚀 初始化模型与加载数据，当前目标数据集: 【{dataset_name}】 | 数据划分: 【{split_name}】")
+    print(f"\n初始化模型与加载数据，当前目标数据集: 【{dataset_name}】 | 数据划分: 【{split_name}】")
     
     if dataset_name == "LIAR-RAW":
         N_TAGS = 6
@@ -63,7 +63,15 @@ def main():
     # 双重保险，确保底层类使用正确的字典
     reader5_module.LABEL_IDS = LABEL_IDS
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    if args.device == "cpu":
+        device = torch.device("cpu")
+    elif args.device == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError("你指定了 --device cuda，但当前环境没有可用 CUDA。")
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"device={device}")
     
     model = ExplainFC(
         hidden_size=384, lstm_layers=1, n_tags=N_TAGS, char_feat_dim=0,
@@ -78,7 +86,7 @@ def main():
         data_path = os.path.join(project_root, "datasets", dataset_name, split_name)
 
     if not os.path.exists(data_path):
-        print(f"❌ 找不到原始数据路径: {data_path}")
+        print(f"找不到原始数据路径: {data_path}")
         return
         
     dataset = myDataset(data_path, report_each_claim=REPORT_EACH_CLAIM)
@@ -86,9 +94,11 @@ def main():
 
     rl_buffer_data = []
 
-    print(f"⏳ 开始提取【{split_name}】特征数据，请耐心等待...")
+    print(f"开始提取【{split_name}】特征数据，请耐心等待...")
     with torch.no_grad(): 
         for i, (oracle_ids, label_ids, raw_text_dict, lm_ids_dict) in enumerate(tqdm(train_loader, desc=f"{split_name} 提取进度")):
+            if args.limit > 0 and i >= args.limit:
+                break
             
             # 1. 提取被完美修复的标签
             true_label_idx = label_ids[0].item()
@@ -135,11 +145,17 @@ def main():
             }
             rl_buffer_data.append(data_point)
 
-    output_path = os.path.join(project_root, "datasets", dataset_name, f"rl_offline_buffer_{split_name}_features.json")
-    print(f"💾 正在保存至 {output_path} ... ")
+    output_suffix = args.output_suffix
+    if args.limit > 0 and not output_suffix:
+        output_suffix = f"debug{args.limit}"
+    suffix = f"_{output_suffix}" if output_suffix else ""
+    output_path = os.path.join(project_root, "datasets", dataset_name, f"rl_offline_buffer_{split_name}_features{suffix}.json")
+    if os.path.exists(output_path) and not args.overwrite:
+        raise FileExistsError(f"输出文件已存在，请加 --overwrite 或换 --output-suffix: {output_path}")
+    print(f"正在保存至 {output_path} ... ")
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(rl_buffer_data, f, ensure_ascii=False)
-    print(f"🎉 保存成功！这 200 条数据终于带着正确的 True 和 False 标签回来了！")
+    print(f"保存成功，共写入 {len(rl_buffer_data)} 条样本。")
 
 if __name__ == '__main__':
     main()
